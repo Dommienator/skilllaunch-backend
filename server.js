@@ -6,26 +6,28 @@ const crypto = require("crypto");
 
 const app = express();
 
-app.use(cors({
-  origin: function(origin, callback) {
-    const allowed = [
-      "http://localhost:3000",
-      "https://skilllaunch.co.ke",
-      "https://www.skilllaunch.co.ke",
-      "https://skilllaunch-psi.vercel.app",
-    ];
-    if (!origin || allowed.includes(origin)) return callback(null, true);
-    if (origin.endsWith(".vercel.app")) return callback(null, true);
-    callback(new Error("Not allowed by CORS"));
-  },
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      const allowed = [
+        "http://localhost:3000",
+        "https://skilllaunch.co.ke",
+        "https://www.skilllaunch.co.ke",
+        "https://skilllaunch-psi.vercel.app",
+      ];
+      if (!origin || allowed.includes(origin)) return callback(null, true);
+      if (origin.endsWith(".vercel.app")) return callback(null, true);
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  }),
+);
 
 app.use(express.json());
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
+  process.env.SUPABASE_SERVICE_KEY,
 );
 
 function hashPassword(p) {
@@ -52,6 +54,14 @@ app.get("/health", (req, res) => {
       supabase: !!process.env.SUPABASE_URL,
       serviceKey: !!process.env.SUPABASE_SERVICE_KEY,
       adminSecret: !!process.env.ADMIN_SECRET,
+      mpesa: !!(
+        process.env.MPESA_CONSUMER_KEY &&
+        process.env.MPESA_CONSUMER_SECRET &&
+        process.env.MPESA_PASSKEY &&
+        process.env.MPESA_SHORTCODE &&
+        process.env.MPESA_CALLBACK_BASE &&
+        process.env.MPESA_CALLBACK_TOKEN
+      ),
     },
   });
 });
@@ -62,17 +72,28 @@ app.post("/api/auth/register", async (req, res) => {
   if (!email || !name || !password)
     return res.status(400).json({ error: "Please fill in all fields." });
   if (password.length < 6)
-    return res.status(400).json({ error: "Password must be at least 6 characters." });
+    return res
+      .status(400)
+      .json({ error: "Password must be at least 6 characters." });
 
   const key = email.trim().toLowerCase();
   const { data: existing } = await supabase
-    .from("users").select("id").eq("email", key).single();
+    .from("users")
+    .select("id")
+    .eq("email", key)
+    .single();
   if (existing)
-    return res.status(409).json({ error: "An account with this email already exists." });
+    return res
+      .status(409)
+      .json({ error: "An account with this email already exists." });
 
   const { data: user, error } = await supabase
     .from("users")
-    .insert({ email: key, name: name.trim(), password_hash: hashPassword(password) })
+    .insert({
+      email: key,
+      name: name.trim(),
+      password_hash: hashPassword(password),
+    })
     .select("id, email, name, referral_code, access_code, referred_by")
     .single();
 
@@ -86,7 +107,9 @@ app.post("/api/auth/register", async (req, res) => {
 app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password)
-    return res.status(400).json({ error: "Please enter your email and password." });
+    return res
+      .status(400)
+      .json({ error: "Please enter your email and password." });
 
   const { data: user } = await supabase
     .from("users")
@@ -95,7 +118,8 @@ app.post("/api/auth/login", async (req, res) => {
     .eq("password_hash", hashPassword(password))
     .single();
 
-  if (!user) return res.status(401).json({ error: "Incorrect email or password." });
+  if (!user)
+    return res.status(401).json({ error: "Incorrect email or password." });
   res.json({ user });
 });
 
@@ -111,7 +135,9 @@ app.post("/api/validate-referral", async (req, res) => {
     .single();
 
   if (!referrer)
-    return res.status(404).json({ valid: false, error: "Referral code not found." });
+    return res
+      .status(404)
+      .json({ valid: false, error: "Referral code not found." });
   if (!referrer.access_code)
     return res.status(400).json({
       valid: false,
@@ -127,7 +153,8 @@ app.post("/api/payment/intent", async (req, res) => {
   if (!email || !phone)
     return res.status(400).json({ error: "Email and phone number required." });
 
-  const finalAmount = amount || parseInt(process.env.COURSE_PRICE_FULL || "3500");
+  const finalAmount =
+    amount || parseInt(process.env.COURSE_PRICE_FULL || "3500");
 
   const { data: existing } = await supabase
     .from("payments")
@@ -151,16 +178,14 @@ app.post("/api/payment/intent", async (req, res) => {
       .eq("id", existing.id);
     dbError = error;
   } else {
-    const { error } = await supabase
-      .from("payments")
-      .insert({
-        email: email.trim().toLowerCase(),
-        phone: phone.trim(),
-        personal_phone: personalPhone || null,
-        amount: finalAmount,
-        referral_code_used: referralCodeUsed || null,
-        status: "pending",
-      });
+    const { error } = await supabase.from("payments").insert({
+      email: email.trim().toLowerCase(),
+      phone: phone.trim(),
+      personal_phone: personalPhone || null,
+      amount: finalAmount,
+      referral_code_used: referralCodeUsed || null,
+      status: "pending",
+    });
     dbError = error;
   }
 
@@ -187,16 +212,20 @@ app.post("/api/code/activate", async (req, res) => {
     .single();
 
   if (!payment)
-    return res.status(400).json({ error: "Access code not found. Please check it carefully." });
+    return res
+      .status(400)
+      .json({ error: "Access code not found. Please check it carefully." });
 
   if (payment.email !== email.trim().toLowerCase())
     return res.status(403).json({
-      error: "This code belongs to a different account. Please use the email you registered with.",
+      error:
+        "This code belongs to a different account. Please use the email you registered with.",
     });
 
   if (payment.status === "activated")
     return res.status(400).json({
-      error: "This code has already been used. Contact us if you think this is wrong.",
+      error:
+        "This code has already been used. Contact us if you think this is wrong.",
     });
 
   if (payment.status !== "completed")
@@ -231,7 +260,9 @@ app.get("/api/admin/lookup-phone/:phone", requireAdmin, async (req, res) => {
 
   const { data: payment } = await supabase
     .from("payments")
-    .select("id, email, phone, personal_phone, amount, referral_code_used, status, mpesa_ref, access_code, created_at")
+    .select(
+      "id, email, phone, personal_phone, amount, referral_code_used, status, mpesa_ref, access_code, created_at",
+    )
     .eq("phone", phone.trim())
     .order("created_at", { ascending: false })
     .limit(1)
@@ -239,7 +270,8 @@ app.get("/api/admin/lookup-phone/:phone", requireAdmin, async (req, res) => {
 
   if (!payment)
     return res.status(404).json({
-      error: "No record found for this number. The client must have entered it on the payment page first.",
+      error:
+        "No record found for this number. The client must have entered it on the payment page first.",
     });
 
   const { data: user } = await supabase
@@ -248,17 +280,17 @@ app.get("/api/admin/lookup-phone/:phone", requireAdmin, async (req, res) => {
     .eq("email", payment.email)
     .single();
 
-  res.json({ ...payment, name: user?.name || null, userReferralCode: user?.referral_code || null });
+  res.json({
+    ...payment,
+    name: user?.name || null,
+    userReferralCode: user?.referral_code || null,
+  });
 });
 
-// ── Admin: generate codes ──────────────────────────────────────────────────
-app.post("/api/admin/generate-code", requireAdmin, async (req, res) => {
-  const { email, mpesaRef, phone } = req.body;
-  if (!email)
-    return res.status(400).json({ error: "Email is required." });
-
-  const key = email.trim().toLowerCase();
-
+// ── Grant access (shared by manual admin route and M-Pesa auto-unlock) ──────
+// Generates the access code + referral code, marks the payment completed,
+// unlocks the user, and creates the referral reward. Same logic as before.
+async function grantAccess(key, { mpesaRef, phone } = {}) {
   const { data: user } = await supabase
     .from("users")
     .select("id, email, name, referred_by, referral_code")
@@ -266,14 +298,18 @@ app.post("/api/admin/generate-code", requireAdmin, async (req, res) => {
     .single();
 
   if (!user)
-    return res.status(404).json({
+    return {
+      status: 404,
       error: `No account found for ${key}. The client must register on the site first.`,
-    });
+    };
 
   let accessCode = generateAccessCode();
   for (let i = 0; i < 10; i++) {
     const { data: exists } = await supabase
-      .from("payments").select("id").eq("access_code", accessCode).single();
+      .from("payments")
+      .select("id")
+      .eq("access_code", accessCode)
+      .single();
     if (!exists) break;
     accessCode = generateAccessCode();
   }
@@ -283,23 +319,36 @@ app.post("/api/admin/generate-code", requireAdmin, async (req, res) => {
     referralCode = generateReferralCode();
     for (let i = 0; i < 10; i++) {
       const { data: exists } = await supabase
-        .from("users").select("id").eq("referral_code", referralCode).single();
+        .from("users")
+        .select("id")
+        .eq("referral_code", referralCode)
+        .single();
       if (!exists) break;
       referralCode = generateReferralCode();
     }
-    await supabase.from("users").update({ referral_code: referralCode }).eq("email", key);
+    await supabase
+      .from("users")
+      .update({ referral_code: referralCode })
+      .eq("email", key);
   }
 
-  const { data: pendingPayment } = await supabase
+  // A payment waiting for codes is either 'pending' (manual) or 'paid' (STK Push).
+  // Prefer a 'paid' one so the M-Pesa receipt row is the one that gets completed.
+  const { data: waiting } = await supabase
     .from("payments")
-    .select("id, amount, phone, personal_phone")
+    .select("id, amount, phone, personal_phone, status, mpesa_ref")
     .eq("email", key)
-    .eq("status", "pending")
+    .in("status", ["pending", "paid"])
     .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+    .limit(10);
+  const pendingPayment =
+    (waiting || []).find((p) => p.status === "paid") ||
+    (waiting || [])[0] ||
+    null;
 
-  const amount = pendingPayment?.amount || parseInt(process.env.COURSE_PRICE_FULL || "3500");
+  const amount =
+    pendingPayment?.amount || parseInt(process.env.COURSE_PRICE_FULL || "3500");
+  const ref = mpesaRef ? String(mpesaRef).trim().toUpperCase() : null;
 
   if (pendingPayment) {
     await supabase
@@ -307,7 +356,8 @@ app.post("/api/admin/generate-code", requireAdmin, async (req, res) => {
       .update({
         access_code: accessCode,
         status: "completed",
-        mpesa_ref: mpesaRef ? mpesaRef.trim().toUpperCase() : null,
+        // keep the receipt the STK callback already saved if admin typed none
+        mpesa_ref: ref || pendingPayment.mpesa_ref || null,
         phone: phone || pendingPayment.phone || null,
       })
       .eq("id", pendingPayment.id);
@@ -315,7 +365,7 @@ app.post("/api/admin/generate-code", requireAdmin, async (req, res) => {
     await supabase.from("payments").insert({
       email: key,
       phone: phone || null,
-      mpesa_ref: mpesaRef ? mpesaRef.trim().toUpperCase() : null,
+      mpesa_ref: ref,
       amount,
       access_code: accessCode,
       status: "completed",
@@ -324,15 +374,24 @@ app.post("/api/admin/generate-code", requireAdmin, async (req, res) => {
 
   await supabase
     .from("users")
-    .update({ access_code: accessCode, access_granted_at: new Date().toISOString() })
+    .update({
+      access_code: accessCode,
+      access_granted_at: new Date().toISOString(),
+    })
     .eq("email", key);
 
   if (user.referred_by) {
     const { data: referrer } = await supabase
-      .from("users").select("email").eq("referral_code", user.referred_by).single();
+      .from("users")
+      .select("email")
+      .eq("referral_code", user.referred_by)
+      .single();
     if (referrer) {
       const { data: existingReward } = await supabase
-        .from("referral_rewards").select("id").eq("referred_email", key).single();
+        .from("referral_rewards")
+        .select("id")
+        .eq("referred_email", key)
+        .single();
       if (!existingReward) {
         await supabase.from("referral_rewards").insert({
           referrer_email: referrer.email,
@@ -344,14 +403,30 @@ app.post("/api/admin/generate-code", requireAdmin, async (req, res) => {
     }
   }
 
-  res.json({ ok: true, accessCode, referralCode, email: key, name: user.name });
+  return { ok: true, accessCode, referralCode, email: key, name: user.name };
+}
+
+// ── Admin: generate codes ──────────────────────────────────────────────────
+app.post("/api/admin/generate-code", requireAdmin, async (req, res) => {
+  const { email, mpesaRef, phone } = req.body;
+  if (!email) return res.status(400).json({ error: "Email is required." });
+
+  const result = await grantAccess(email.trim().toLowerCase(), {
+    mpesaRef,
+    phone,
+  });
+  if (result.error)
+    return res.status(result.status || 500).json({ error: result.error });
+  res.json(result);
 });
 
 // ── Admin: get all customers ───────────────────────────────────────────────
 app.get("/api/admin/customers", requireAdmin, async (req, res) => {
   const { data } = await supabase
     .from("users")
-    .select("id, email, name, referral_code, access_code, referred_by, created_at")
+    .select(
+      "id, email, name, referral_code, access_code, referred_by, created_at",
+    )
     .order("created_at", { ascending: false });
   res.json(data || []);
 });
@@ -365,14 +440,21 @@ app.get("/api/admin/payments", requireAdmin, async (req, res) => {
 
   if (!payments || payments.length === 0) return res.json([]);
 
-  const emails = [...new Set(payments.map(p => p.email))];
+  const emails = [...new Set(payments.map((p) => p.email))];
   const { data: users } = await supabase
-    .from("users").select("email, name").in("email", emails);
+    .from("users")
+    .select("email, name")
+    .in("email", emails);
 
   const nameMap = {};
-  (users || []).forEach(u => { nameMap[u.email] = u.name; });
+  (users || []).forEach((u) => {
+    nameMap[u.email] = u.name;
+  });
 
-  const enriched = payments.map(p => ({ ...p, name: nameMap[p.email] || null }));
+  const enriched = payments.map((p) => ({
+    ...p,
+    name: nameMap[p.email] || null,
+  }));
   res.json(enriched);
 });
 
@@ -395,6 +477,9 @@ app.post("/api/admin/rewards/pay", requireAdmin, async (req, res) => {
     .eq("id", id);
   res.json({ ok: true });
 });
+
+// ── M-Pesa (Daraja STK Push) ───────────────────────────────────────────────
+require("./mpesa")(app, { supabase, grantAccess });
 
 // ── Start ──────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
